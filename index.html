@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hotel Management System</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="tabs">
+      <button class="tab-button active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-button" data-tab="guests">Guest Management</button>
+      <button class="tab-button" data-tab="rooms">Room Management</button>
+      <button class="tab-button" data-tab="food">Food & Restaurant</button>
+      <button class="tab-button" data-tab="housekeeping">Housekeeping</button>
+      <button class="tab-button" data-tab="billing">Invoice & Billing</button>
+      <button class="tab-button" data-tab="reports">Reports</button>
+    </div>
+
+    <div id="dashboard" class="tab-content active">
+        <h2>Dashboard</h2>
+        <div class="dashboard-container">
+            <div class="chart-container">
+                <canvas id="occupancy-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="revenue-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="guests" class="tab-content">
+        <h2>Guest Management</h2>
+        <div class="form-container">
+            <label for="aadhaar">Aadhaar Number:</label>
+            <input type="text" id="aadhaar" maxlength="12">
+            <button id="fetch-details">Fetch Details</button>
+
+            <form id="guest-form">
+                <label for="fullName">Full Name:</label>
+                <input type="text" id="fullName">
+
+                <label for="mobile">Mobile Number:</label>
+                <input type="text" id="mobile">
+
+                <label for="email">Email:</label>
+                <input type="email" id="email">
+
+                <label for="address">Address:</label>
+                <textarea id="address"></textarea>
+
+                <button type="submit">Save Guest</button>
+            </form>
+        </div>
+        <div id="previous-stays-container">
+            <h2>Previous Stays</h2>
+            <ul id="previous-stays-list"></ul>
+        </div>
+    </div>
+
+    <div id="rooms" class="tab-content">
+        <h2>Room Management</h2>
+        <div id="room-container"></div>
+    </div>
+    
+    <div id="food" class="tab-content">
+        <h2>Food & Restaurant</h2>
+        <form id="food-drink-form">
+            <label for="item-name">Item Name:</label>
+            <input type="text" id="item-name">
+            <label for="item-price">Price:</label>
+            <input type="number" id="item-price">
+            <button type="submit">Add Item</button>
+        </form>
+        <h3>Ordered Items</h3>
+        <ul id="ordered-items-list"></ul>
+    </div>
+
+    <div id="housekeeping" class="tab-content">
+        <h2>Housekeeping</h2>
+        <div id="housekeeping-container"></div>
+    </div>
+
+    <div id="billing" class="tab-content">
+        <h2>Invoice & Billing</h2>
+        <button id="generate-invoice">Generate Invoice</button>
+        <div id="invoice-container" style="display: none;">
+            <h3>Invoice</h3>
+            <div id="invoice-content"></div>
+            <button id="print-invoice">Print Invoice</button>
+        </div>
+    </div>
+
+    <div id="reports" class="tab-content">
+        <h2>Reports</h2>
+        <button id="generate-occupancy-report">Generate Occupancy Report</button>
+        <div id="report-container"></div>
+    </div>
+
+    <div id="loading-indicator" style="display: none;">Loading...</div>
+    <div id="success-indicator" style="display: none;">Success!</div>
+    <div id="error-message" style="display: none;"></div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
