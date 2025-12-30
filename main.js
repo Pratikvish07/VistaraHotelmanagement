@@ -19,6 +19,8 @@ function createWindow() {
       : `file://${path.join(__dirname, '../build/index.html')}`
   );
 
+  win.focus();
+
   if (isDev) {
     win.webContents.openDevTools();
   }

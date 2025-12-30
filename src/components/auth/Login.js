@@ -1,136 +1,116 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Form, Button, Alert } from 'react-bootstrap';
-import { auth } from '../../firebase-config';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { useNavigate } from 'react-router-dom'; // ✅ FIX
+import { auth, db } from '../../firebase-config';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 function Login() {
-  const [registerEmail, setRegisterEmail] = useState("");
-  const [registerPassword, setRegisterPassword] = useState("");
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  const navigate = useNavigate(); // ✅ FIX
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegister, setIsRegister] = useState(false);
   const [user, setUser] = useState(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
 
-  auth.onAuthStateChanged(setUser);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
 
-  const register = useCallback(async () => {
+        const ref = doc(db, 'users', currentUser.uid);
+        const snap = await getDoc(ref);
+
+        if (snap.exists()) {
+          const role = snap.data().role;
+          if (role === 'manager') navigate('/dashboard');
+          else navigate('/home');
+        }
+      }
+    });
+
+    return () => unsub();
+  }, [navigate]);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setError('');
+
     try {
-      setError("");
-      const user = await createUserWithEmailAndPassword(
-        auth,
-        registerEmail,
-        registerPassword
-      );
-      console.log(user);
-    } catch (error) {
-      setError(error.message);
-    }
-  }, [registerEmail, registerPassword]);
+      if (isRegister) {
+        const res = await createUserWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password.trim()
+        );
 
-  const login = useCallback(async () => {
-    try {
-      setError("");
-      const user = await signInWithEmailAndPassword(
-        auth,
-        loginEmail,
-        loginPassword
-      );
-      console.log(user);
-    } catch (error) {
-      setError(error.message);
+        await setDoc(doc(db, 'users', res.user.uid), {
+          email,
+          role: 'employee',
+          createdAt: new Date()
+        });
+      } else {
+        await signInWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password.trim()
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err.code);
     }
-  }, [loginEmail, loginPassword]);
-
-  const logout = useCallback(async () => {
-    await signOut(auth);
-  }, []);
+  };
 
   return (
-    <Container className="mt-5">
-      <Row className="justify-content-center">
-        <Col md={6}>
-          {user ? (
-            <Card>
-              <Card.Body className="text-center">
-                <Card.Title>Welcome, {user.email}</Card.Title>
-                <Button variant="danger" onClick={logout}>Sign Out</Button>
-              </Card.Body>
-            </Card>
-          ) : (
-            <>
+    <Container fluid className="min-vh-100 d-flex align-items-center bg-light">
+      <Row className="w-100 justify-content-center">
+        <Col md={4}>
+          <Card className="shadow">
+            <Card.Body>
+              <h4 className="text-center mb-3">
+                {isRegister ? 'Create Account' : 'Login'}
+              </h4>
+
               {error && <Alert variant="danger">{error}</Alert>}
-              <Row>
-                <Col md={6}>
-                  <Card className="mb-4">
-                    <Card.Header>
-                      <Card.Title>Register User</Card.Title>
-                    </Card.Header>
-                    <Card.Body>
-                      <Form>
-                        <Form.Group className="mb-3">
-                          <Form.Label>Email</Form.Label>
-                          <Form.Control
-                            type="email"
-                            placeholder="Email..."
-                            value={registerEmail}
-                            onChange={(e) => setRegisterEmail(e.target.value)}
-                          />
-                        </Form.Group>
-                        <Form.Group className="mb-3">
-                          <Form.Label>Password</Form.Label>
-                          <Form.Control
-                            type="password"
-                            placeholder="Password..."
-                            value={registerPassword}
-                            onChange={(e) => setRegisterPassword(e.target.value)}
-                          />
-                        </Form.Group>
-                        <Button variant="primary" onClick={register} className="w-100">
-                          Create User
-                        </Button>
-                      </Form>
-                    </Card.Body>
-                  </Card>
-                </Col>
-                <Col md={6}>
-                  <Card>
-                    <Card.Header>
-                      <Card.Title>Login</Card.Title>
-                    </Card.Header>
-                    <Card.Body>
-                      <Form>
-                        <Form.Group className="mb-3">
-                          <Form.Label>Email</Form.Label>
-                          <Form.Control
-                            type="email"
-                            placeholder="Email..."
-                            value={loginEmail}
-                            onChange={(e) => setLoginEmail(e.target.value)}
-                          />
-                        </Form.Group>
-                        <Form.Group className="mb-3">
-                          <Form.Label>Password</Form.Label>
-                          <Form.Control
-                            type="password"
-                            placeholder="Password..."
-                            value={loginPassword}
-                            onChange={(e) => setLoginPassword(e.target.value)}
-                          />
-                        </Form.Group>
-                        <Button variant="success" onClick={login} className="w-100">
-                          Login
-                        </Button>
-                      </Form>
-                    </Card.Body>
-                  </Card>
-                </Col>
-              </Row>
-            </>
-          )}
+
+              <Form onSubmit={handleAuth}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Email</Form.Label>
+                  <Form.Control
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                  <Form.Label>Password</Form.Label>
+                  <Form.Control
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </Form.Group>
+
+                <Button type="submit" className="w-100">
+                  {isRegister ? 'Register' : 'Login'}
+                </Button>
+              </Form>
+            </Card.Body>
+          </Card>
         </Col>
       </Row>
     </Container>
   );
-};
+}
 
 export default Login;

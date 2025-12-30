@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase-config';
-import { collection, getDocs, addDoc } from 'firebase/firestore';
+import { db, auth } from '../../firebase-config';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  query,
+  where
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 function CustomerManagement() {
   const [customers, setCustomers] = useState([]);
+  const [user, setUser] = useState(null);
+
   const [newCustomer, setNewCustomer] = useState({
     name: '',
     aadhaar: '',
@@ -11,70 +20,125 @@ function CustomerManagement() {
     email: ''
   });
 
-  const customersCollectionRef = collection(db, 'customers');
-
-  const createCustomer = async () => {
-    await addDoc(customersCollectionRef, newCustomer);
-    // Refresh customers list
-    const data = await getDocs(customersCollectionRef);
-    setCustomers(data.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
-  };
-
+  // 🔐 Wait for auth
   useEffect(() => {
-    const getCustomers = async () => {
-      const data = await getDocs(customersCollectionRef);
-      setCustomers(data.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsub();
+  }, []);
+
+  // 📥 Fetch customers (user-wise)
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchCustomers = async () => {
+      const q = query(
+        collection(db, 'customers'),
+        where('createdBy', '==', user.uid)
+      );
+
+      const snapshot = await getDocs(q);
+      setCustomers(snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })));
     };
 
-    getCustomers();
-  }, [customersCollectionRef]);
+    fetchCustomers();
+  }, [user]);
+
+  // ➕ Create customer (AUTO CREATES COLLECTION)
+  const createCustomer = async () => {
+    if (!user) return alert('Not authenticated');
+
+    await addDoc(collection(db, 'customers'), {
+      ...newCustomer,
+      createdBy: user.uid,      // 🔑 REQUIRED
+      createdAt: new Date()
+    });
+
+    // Refresh list
+    const q = query(
+      collection(db, 'customers'),
+      where('createdBy', '==', user.uid)
+    );
+
+    const snapshot = await getDocs(q);
+    setCustomers(snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })));
+
+    // Reset form
+    setNewCustomer({
+      name: '',
+      aadhaar: '',
+      mobile: '',
+      email: ''
+    });
+  };
 
   return (
-    <div>
+    <div style={{ padding: '20px' }}>
       <h1>Customer Management</h1>
 
-      <div>
-        <h2>Add Customer</h2>
+      {/* ➕ Add Customer */}
+      <div style={{ marginBottom: '30px' }}>
+        <h3>Add Customer</h3>
+
         <input
           placeholder="Name"
-          onChange={(event) => {
-            setNewCustomer({ ...newCustomer, name: event.target.value });
-          }}
+          value={newCustomer.name}
+          onChange={(e) =>
+            setNewCustomer({ ...newCustomer, name: e.target.value })
+          }
         />
+
         <input
           placeholder="Aadhaar Number"
-          onChange={(event) => {
-            setNewCustomer({ ...newCustomer, aadhaar: event.target.value });
-          }}
+          value={newCustomer.aadhaar}
+          onChange={(e) =>
+            setNewCustomer({ ...newCustomer, aadhaar: e.target.value })
+          }
         />
+
         <input
           placeholder="Mobile Number"
-          onChange={(event) => {
-            setNewCustomer({ ...newCustomer, mobile: event.target.value });
-          }}
+          value={newCustomer.mobile}
+          onChange={(e) =>
+            setNewCustomer({ ...newCustomer, mobile: e.target.value })
+          }
         />
+
         <input
           placeholder="Email"
-          onChange={(event) => {
-            setNewCustomer({ ...newCustomer, email: event.target.value });
-          }}
+          value={newCustomer.email}
+          onChange={(e) =>
+            setNewCustomer({ ...newCustomer, email: e.target.value })
+          }
         />
+
+        <br />
         <button onClick={createCustomer}>Add Customer</button>
       </div>
 
-      <div>
-        <h2>Registered Customers</h2>
-        {customers.map((customer) => {
-          return (
-            <div key={customer.id}>
-              <h3>{customer.name}</h3>
-              <p>Aadhaar: {customer.aadhaar}</p>
-              <p>Mobile: {customer.mobile}</p>
-              <p>Email: {customer.email}</p>
-            </div>
-          );
-        })}
-      </div>
+      {/* 📋 Customer List */}
+      <h3>Registered Customers</h3>
+
+      {customers.length === 0 && <p>No customers found</p>}
+
+      {customers.map((customer) => (
+        <div
+          key={customer.id}
+          style={{ border: '1px solid #ccc', padding: '10px', marginBottom: '10px' }}
+        >
+          <p><strong>Name:</strong> {customer.name}</p>
+          <p><strong>Aadhaar:</strong> {customer.aadhaar}</p>
+          <p><strong>Mobile:</strong> {customer.mobile}</p>
+          <p><strong>Email:</strong> {customer.email}</p>
+        </div>
+      ))}
     </div>
   );
 }

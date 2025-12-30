@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase-config';
-import { collection, getDocs, addDoc } from 'firebase/firestore';
+import { db, auth } from '../../firebase-config';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  query,
+  where
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 function BookingManagement() {
   const [bookings, setBookings] = useState([]);
+  const [user, setUser] = useState(null);
+
   const [newBooking, setNewBooking] = useState({
     guestAadhaar: '',
     roomNumber: '',
@@ -11,72 +20,116 @@ function BookingManagement() {
     checkOutDate: ''
   });
 
-  const bookingsCollectionRef = collection(db, 'bookings');
-
-  const createBooking = async () => {
-    await addDoc(bookingsCollectionRef, newBooking);
-    // Refresh bookings list
-    const data = await getDocs(bookingsCollectionRef);
-    setBookings(data.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
-  };
-
+  // 🔐 Wait for Auth
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsub();
+  }, []);
+
+  // 📥 Fetch bookings (user-wise)
+  useEffect(() => {
+    if (!user) return;
+
     const getBookings = async () => {
-      const data = await getDocs(bookingsCollectionRef);
+      const q = query(
+        collection(db, 'bookings'),
+        where('createdBy', '==', user.uid)
+      );
+
+      const data = await getDocs(q);
       setBookings(data.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
     };
 
     getBookings();
-  }, [bookingsCollectionRef]);
+  }, [user]);
+
+  // ➕ Create booking (AUTO CREATES COLLECTION)
+  const createBooking = async () => {
+    if (!user) return alert('Not authenticated');
+
+    await addDoc(collection(db, 'bookings'), {
+      ...newBooking,
+      createdBy: user.uid,          // 🔑 REQUIRED
+      createdAt: new Date()
+    });
+
+    // refresh list
+    const q = query(
+      collection(db, 'bookings'),
+      where('createdBy', '==', user.uid)
+    );
+
+    const data = await getDocs(q);
+    setBookings(data.docs.map((doc) => ({ ...doc.data(), id: doc.id })));
+
+    // reset form
+    setNewBooking({
+      guestAadhaar: '',
+      roomNumber: '',
+      checkInDate: '',
+      checkOutDate: ''
+    });
+  };
 
   return (
-    <div>
+    <div style={{ padding: '20px' }}>
       <h1>Booking Management</h1>
 
-      <div>
-        <h2>Create Booking</h2>
+      {/* ➕ Create Booking */}
+      <div style={{ marginBottom: '30px' }}>
+        <h3>Create Booking</h3>
+
         <input
           placeholder="Guest Aadhaar"
-          onChange={(event) => {
-            setNewBooking({ ...newBooking, guestAadhaar: event.target.value });
-          }}
+          value={newBooking.guestAadhaar}
+          onChange={(e) =>
+            setNewBooking({ ...newBooking, guestAadhaar: e.target.value })
+          }
         />
+
         <input
           placeholder="Room Number"
-          onChange={(event) => {
-            setNewBooking({ ...newBooking, roomNumber: event.target.value });
-          }}
+          value={newBooking.roomNumber}
+          onChange={(e) =>
+            setNewBooking({ ...newBooking, roomNumber: e.target.value })
+          }
         />
+
         <input
           type="date"
-          placeholder="Check-in Date"
-          onChange={(event) => {
-            setNewBooking({ ...newBooking, checkInDate: event.target.value });
-          }}
+          value={newBooking.checkInDate}
+          onChange={(e) =>
+            setNewBooking({ ...newBooking, checkInDate: e.target.value })
+          }
         />
+
         <input
           type="date"
-          placeholder="Check-out Date"
-          onChange={(event) => {
-            setNewBooking({ ...newBooking, checkOutDate: event.target.value });
-          }}
+          value={newBooking.checkOutDate}
+          onChange={(e) =>
+            setNewBooking({ ...newBooking, checkOutDate: e.target.value })
+          }
         />
+
+        <br />
         <button onClick={createBooking}>Create Booking</button>
       </div>
 
-      <div>
-        <h2>Current Bookings</h2>
-        {bookings.map((booking) => {
-          return (
-            <div key={booking.id}>
-              <h3>Guest Aadhaar: {booking.guestAadhaar}</h3>
-              <p>Room Number: {booking.roomNumber}</p>
-              <p>Check-in: {booking.checkInDate}</p>
-              <p>Check-out: {booking.checkOutDate}</p>
-            </div>
-          );
-        })}
-      </div>
+      {/* 📋 Booking List */}
+      <h3>Current Bookings</h3>
+
+      {bookings.length === 0 && <p>No bookings found</p>}
+
+      {bookings.map((booking) => (
+        <div key={booking.id} style={{ border: '1px solid #ccc', padding: '10px', marginBottom: '10px' }}>
+          <p><strong>Aadhaar:</strong> {booking.guestAadhaar}</p>
+          <p><strong>Room:</strong> {booking.roomNumber}</p>
+          <p><strong>Check-in:</strong> {booking.checkInDate}</p>
+          <p><strong>Check-out:</strong> {booking.checkOutDate}</p>
+        </div>
+      ))}
     </div>
   );
 }
