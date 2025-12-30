@@ -3,12 +3,13 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCxINWrHxODC0qGkCj1vk2Km7QHqvmgoB8",
+  authDomain: "vistarahotelmanagement.firebaseapp.com",
+  projectId: "vistarahotelmanagement",
+  storageBucket: "vistarahotelmanagement.firebasestorage.app",
+  messagingSenderId: "32791890470",
+  appId: "1:32791890470:web:41a8482cc292c3d6bcb4e7",
+  measurementId: "G-5T9F2HJ1MM"
 };
 
 const app = initializeApp(firebaseConfig);

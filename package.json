@@ -2,7 +2,7 @@
   "name": "hotel-management-system",
   "version": "1.0.0",
   "private": true,
-  "main": "public/electron.js",
+  "main": "main.js",
   "homepage": "./",
   "scripts": {
     "start": "react-scripts start",
@@ -11,10 +11,31 @@
     "electron:dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron-builder"
   },
+  "dependencies": {
+    "bootstrap": "^5.3.8",
+    "firebase": "^9.17.1",
+    "react": "^18.2.0",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.8.0"
+  },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
+    "react-scripts": "^5.0.1",
     "wait-on": "^9.0.3"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }
