@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
 const RoomManagement = lazy(() => import('./components/rooms/RoomManagement'));
 const CustomerManagement = lazy(() => import('./components/customers/CustomerManagement'));
 const BookingManagement = lazy(() => import('./components/bookings/BookingManagement'));
+const CleaningManagement = lazy(() => import('./components/cleaning/CleaningManagement'));
 
 const LoadingSpinner = () => (
   <div className="d-flex justify-content-center align-items-center" style={{ height: '100vh' }}>
@@ -58,6 +59,15 @@ function App() {
               element={
                 <ProtectedRoute>
                   <BookingManagement />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/cleaning"
+              element={
+                <ProtectedRoute>
+                  <CleaningManagement />
                 </ProtectedRoute>
               }
             />

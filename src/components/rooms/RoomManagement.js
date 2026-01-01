@@ -1,17 +1,22 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db, auth, storage } from '../../firebase-config';
+
 import {
   collection,
   getDocs,
   addDoc,
   updateDoc,
+  deleteDoc,
   doc,
   query,
   where,
   getDoc
 } from 'firebase/firestore';
+
 import { onAuthStateChanged } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
 import {
   Container,
   Row,
@@ -26,6 +31,8 @@ import {
 } from 'react-bootstrap';
 
 function RoomManagement() {
+  const navigate = useNavigate();
+
   const [rooms, setRooms] = useState([]);
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
@@ -34,25 +41,25 @@ function RoomManagement() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingRoom, setEditingRoom] = useState(null);
 
-  const [newRoom, setNewRoom] = useState({
+  const emptyRoom = {
     roomNumber: '',
     type: '',
     price: '',
     paymentMethod: '',
     paymentReceived: false,
-    isVacant: true,
     cleaningDone: true,
-    documentUrl: '',
     documentFile: null
-  });
+  };
 
-  // 🔐 Auth
+  const [newRoom, setNewRoom] = useState(emptyRoom);
+
+  /* ---------------- AUTH ---------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
-  // 👤 Role
+  /* ---------------- ROLE ---------------- */
   useEffect(() => {
     if (!user) return;
 
@@ -64,28 +71,56 @@ function RoomManagement() {
     fetchRole();
   }, [user]);
 
-  // 📥 Fetch Rooms
-  const fetchRooms = async () => {
+  /* ---------------- FETCH ROOMS (SYNC WITH BOOKINGS) ---------------- */
+  const fetchRoomsWithBookingStatus = async () => {
     if (!user) return;
 
-    const q = query(
-      collection(db, 'rooms'),
-      where('createdBy', '==', user.uid)
+    // 1️⃣ Fetch rooms
+    const roomsSnap = await getDocs(
+      query(collection(db, 'rooms'), where('createdBy', '==', user.uid))
     );
 
-    const snap = await getDocs(q);
-    setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const roomsData = roomsSnap.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    }));
+
+    // 2️⃣ Fetch ACTIVE bookings
+    const bookingsSnap = await getDocs(
+      query(
+        collection(db, 'bookings'),
+        where('createdBy', '==', user.uid),
+        where('status', '==', 'active')
+      )
+    );
+
+    const occupiedRoomIds = bookingsSnap.docs.map(
+      b => b.data().roomId
+    );
+
+    // 3️⃣ Merge booking state into rooms
+    const syncedRooms = roomsData.map(room => {
+      const occupied = occupiedRoomIds.includes(room.id);
+      return {
+        ...room,
+        isVacant: !occupied,
+        status: occupied ? 'occupied' : 'available'
+      };
+    });
+
+    setRooms(syncedRooms);
   };
 
   useEffect(() => {
-    fetchRooms();
+    fetchRoomsWithBookingStatus();
   }, [user]);
 
-  // ➕ Create Room
+  /* ---------------- CREATE ROOM ---------------- */
   const createRoom = async () => {
     if (!user) return alert('Not authenticated');
 
     let documentUrl = '';
+
     if (newRoom.documentFile) {
       const storageRef = ref(
         storage,
@@ -101,45 +136,25 @@ function RoomManagement() {
       price: Number(newRoom.price),
       paymentMethod: newRoom.paymentMethod,
       paymentReceived: newRoom.paymentReceived,
-      isVacant: newRoom.isVacant,
       cleaningDone: newRoom.cleaningDone,
-      status: newRoom.isVacant ? 'available' : 'occupied',
+      status: 'available',
+      isVacant: true,
       documentUrl,
       createdBy: user.uid,
       createdAt: new Date()
     });
 
-    await fetchRooms();
     setShowAddModal(false);
-
-    setNewRoom({
-      roomNumber: '',
-      type: '',
-      price: '',
-      paymentMethod: '',
-      paymentReceived: false,
-      isVacant: true,
-      cleaningDone: true,
-      documentUrl: '',
-      documentFile: null
-    });
+    setNewRoom(emptyRoom);
+    fetchRoomsWithBookingStatus();
   };
 
-  // ✏️ Update Status
-  const updateRoomStatus = async (id, field, value) => {
-    const data = { [field]: value };
-    if (field === 'isVacant') {
-      data.status = value ? 'available' : 'occupied';
-    }
-    await updateDoc(doc(db, 'rooms', id), data);
-    fetchRooms();
-  };
-
-  // ✏️ Edit Room
+  /* ---------------- EDIT ROOM ---------------- */
   const editRoom = async () => {
     if (!editingRoom) return;
 
     let documentUrl = editingRoom.documentUrl || '';
+
     if (editingRoom.documentFile) {
       const storageRef = ref(
         storage,
@@ -149,33 +164,61 @@ function RoomManagement() {
       documentUrl = await getDownloadURL(storageRef);
     }
 
-    await updateDoc(doc(db, 'rooms', editingRoom.id), {
-      ...editingRoom,
-      price: Number(editingRoom.price),
-      status: editingRoom.isVacant ? 'available' : 'occupied',
-      documentUrl
+    const { id, documentFile, ...safeData } = editingRoom;
+
+    await updateDoc(doc(db, 'rooms', id), {
+      ...safeData,
+      price: Number(safeData.price),
+      documentUrl,
+      updatedAt: new Date()
     });
 
     setShowEditModal(false);
     setEditingRoom(null);
-    fetchRooms();
+    fetchRoomsWithBookingStatus();
   };
 
-  const getStatusBadge = (room) => {
-    if (!room.isVacant) return <Badge bg="danger">Occupied</Badge>;
-    if (!room.cleaningDone) return <Badge bg="warning">Needs Cleaning</Badge>;
-    return <Badge bg="success">Available</Badge>;
+  /* ---------------- DELETE ROOM ---------------- */
+  const deleteRoom = async room => {
+    if (room.status === 'occupied') {
+      return alert('Cannot delete an occupied room');
+    }
+
+    if (!window.confirm(`Delete Room ${room.roomNumber}?`)) return;
+
+    await deleteDoc(doc(db, 'rooms', room.id));
+    fetchRoomsWithBookingStatus();
   };
 
+  /* ---------------- STATUS BADGE ---------------- */
+  const getStatusBadge = room => (
+    <Badge bg={room.status === 'occupied' ? 'danger' : 'success'}>
+      {room.status === 'occupied' ? 'Occupied' : 'Available'}
+    </Badge>
+  );
+
+  /* ---------------- UI ---------------- */
   return (
     <Container fluid className="py-4">
-      <Row className="mb-4">
-        <Col><h1>Room Management</h1></Col>
+      <Row className="mb-3">
+        <Col>
+          <Button
+            variant="outline-secondary"
+            className="mb-3"
+            onClick={() => navigate('/dashboard')}
+          >
+            ← Back to Dashboard
+          </Button>
+          <h1>Room Management</h1>
+          <p className="text-muted">
+            Room status auto-synced from bookings
+          </p>
+        </Col>
       </Row>
 
       {userRole === 'manager' && (
         <Button className="mb-3" onClick={() => setShowAddModal(true)}>
-          Add Room
+          + Add Room
         </Button>
       )}
 
@@ -191,11 +234,10 @@ function RoomManagement() {
                   <th>Type</th>
                   <th>Price</th>
                   <th>Status</th>
-                  <th>Vacant</th>
                   <th>Cleaning</th>
                   <th>Payment</th>
                   <th>Document</th>
-                  <th>Action</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,18 +250,11 @@ function RoomManagement() {
                     <td>
                       <Form.Check
                         type="switch"
-                        checked={r.isVacant}
-                        onChange={e =>
-                          updateRoomStatus(r.id, 'isVacant', e.target.checked)
-                        }
-                      />
-                    </td>
-                    <td>
-                      <Form.Check
-                        type="switch"
                         checked={r.cleaningDone}
                         onChange={e =>
-                          updateRoomStatus(r.id, 'cleaningDone', e.target.checked)
+                          updateDoc(doc(db, 'rooms', r.id), {
+                            cleaningDone: e.target.checked
+                          }).then(fetchRoomsWithBookingStatus)
                         }
                       />
                     </td>
@@ -228,7 +263,9 @@ function RoomManagement() {
                         type="switch"
                         checked={r.paymentReceived}
                         onChange={e =>
-                          updateRoomStatus(r.id, 'paymentReceived', e.target.checked)
+                          updateDoc(doc(db, 'rooms', r.id), {
+                            paymentReceived: e.target.checked
+                          }).then(fetchRoomsWithBookingStatus)
                         }
                       />
                     </td>
@@ -241,15 +278,25 @@ function RoomManagement() {
                     </td>
                     <td>
                       {userRole === 'manager' && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setEditingRoom(r);
-                            setShowEditModal(true);
-                          }}
-                        >
-                          Edit
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            className="me-2"
+                            onClick={() => {
+                              setEditingRoom(r);
+                              setShowEditModal(true);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => deleteRoom(r)}
+                          >
+                            Delete
+                          </Button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -271,12 +318,16 @@ function RoomManagement() {
               className="mb-2"
               placeholder="Room Number"
               value={newRoom.roomNumber}
-              onChange={e => setNewRoom({ ...newRoom, roomNumber: e.target.value })}
+              onChange={e =>
+                setNewRoom({ ...newRoom, roomNumber: e.target.value })
+              }
             />
             <Form.Select
               className="mb-2"
               value={newRoom.type}
-              onChange={e => setNewRoom({ ...newRoom, type: e.target.value })}
+              onChange={e =>
+                setNewRoom({ ...newRoom, type: e.target.value })
+              }
             >
               <option value="">Select Type</option>
               <option>Single</option>
@@ -289,11 +340,15 @@ function RoomManagement() {
               className="mb-2"
               placeholder="Price"
               value={newRoom.price}
-              onChange={e => setNewRoom({ ...newRoom, price: e.target.value })}
+              onChange={e =>
+                setNewRoom({ ...newRoom, price: e.target.value })
+              }
             />
             <Form.Control
               type="file"
-              onChange={e => setNewRoom({ ...newRoom, documentFile: e.target.files[0] })}
+              onChange={e =>
+                setNewRoom({ ...newRoom, documentFile: e.target.files[0] })
+              }
             />
           </Form>
         </Modal.Body>
@@ -314,14 +369,30 @@ function RoomManagement() {
                 className="mb-2"
                 value={editingRoom.roomNumber}
                 onChange={e =>
-                  setEditingRoom({ ...editingRoom, roomNumber: e.target.value })
+                  setEditingRoom({
+                    ...editingRoom,
+                    roomNumber: e.target.value
+                  })
                 }
               />
               <Form.Control
                 type="number"
+                className="mb-2"
                 value={editingRoom.price}
                 onChange={e =>
-                  setEditingRoom({ ...editingRoom, price: e.target.value })
+                  setEditingRoom({
+                    ...editingRoom,
+                    price: e.target.value
+                  })
+                }
+              />
+              <Form.Control
+                type="file"
+                onChange={e =>
+                  setEditingRoom({
+                    ...editingRoom,
+                    documentFile: e.target.files[0]
+                  })
                 }
               />
             </Form>
