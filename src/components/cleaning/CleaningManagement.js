@@ -11,7 +11,6 @@ import {
   deleteDoc,
   doc,
   query,
-  where,
   orderBy
 } from 'firebase/firestore';
 
@@ -27,8 +26,7 @@ import {
   Modal,
   Badge,
   Alert,
-  Table,
-  Dropdown
+  Table
 } from 'react-bootstrap';
 
 function CleaningManagement() {
@@ -36,6 +34,7 @@ function CleaningManagement() {
 
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
+
   const [rooms, setRooms] = useState([]);
   const [cleaningTasks, setCleaningTasks] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
@@ -57,122 +56,163 @@ function CleaningManagement() {
 
   /* ---------------- AUTH ---------------- */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
+    const unsub = onAuthStateChanged(auth, currentUser => {
+      setUser(currentUser);
+    });
     return () => unsub();
   }, []);
 
-  /* ---------------- ROLE ---------------- */
+  /* ---------------- USER ROLE ---------------- */
   useEffect(() => {
     if (!user) return;
 
     const fetchRole = async () => {
       const snap = await getDoc(doc(db, 'users', user.uid));
-      if (snap.exists()) setUserRole(snap.data().role);
+      if (snap.exists()) {
+        setUserRole(snap.data().role); // admin | manager | staff
+      }
     };
 
     fetchRole();
   }, [user]);
 
-  /* ---------------- FETCH ROOMS ---------------- */
+  /* ---------------- FETCH ROOMS (ROLE-BASED) ---------------- */
   useEffect(() => {
-    if (!user) return;
+    if (!user || !userRole) return;
 
     const fetchRooms = async () => {
-      const q = query(
-        collection(db, 'rooms'),
-        where('createdBy', '==', user.uid),
-        orderBy('roomNumber', 'asc')
-      );
-      const snap = await getDocs(q);
-      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      try {
+        // ⚠️ DO NOT filter by createdBy (rules are role-based)
+        const q = query(
+          collection(db, 'rooms'),
+          orderBy('roomNumber', 'asc')
+        );
+
+        const snap = await getDocs(q);
+        setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (error) {
+        console.error('Fetch rooms error:', error);
+        alert(error.message);
+      }
     };
 
     fetchRooms();
-  }, [user]);
+  }, [user, userRole]);
 
   /* ---------------- FETCH CLEANING TASKS ---------------- */
   const fetchCleaningTasks = async () => {
     if (!user) return;
 
-    const q = query(
-      collection(db, 'cleaningTasks'),
-      where('createdBy', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const snap = await getDocs(q);
-    setCleaningTasks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    try {
+      const q = query(
+        collection(db, 'cleaningTasks'),
+        orderBy('createdAt', 'desc')
+      );
+
+      const snap = await getDocs(q);
+
+      // Optional: owner-only visibility
+      const tasks = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(t => t.createdBy === user.uid || userRole !== 'manager');
+
+      setCleaningTasks(tasks);
+    } catch (error) {
+      console.error('Fetch tasks error:', error);
+      alert(error.message);
+    }
   };
 
   useEffect(() => {
-    fetchCleaningTasks();
-  }, [user]);
+    if (user && userRole) fetchCleaningTasks();
+  }, [user, userRole]);
 
   /* ---------------- SAVE TASK ---------------- */
   const saveTask = async () => {
     if (!user) return alert('Not authenticated');
 
-    if (editingTask) {
-      const updateData = {
-        ...taskForm,
-        updatedAt: new Date()
-      };
+    try {
+      if (editingTask) {
+        const updateData = {
+          ...taskForm,
+          updatedAt: new Date()
+        };
 
-      if (taskForm.status === 'completed' && editingTask.status !== 'completed') {
-        updateData.completedAt = new Date();
-        // Update room cleaning status
-        await updateDoc(doc(db, 'rooms', taskForm.roomId), {
-          cleaningDone: true
+        if (
+          taskForm.status === 'completed' &&
+          editingTask.status !== 'completed'
+        ) {
+          updateData.completedAt = new Date();
+
+          // Mark room as cleaned
+          await updateDoc(doc(db, 'rooms', taskForm.roomId), {
+            cleaningDone: true
+          });
+        }
+
+        await updateDoc(
+          doc(db, 'cleaningTasks', editingTask.id),
+          updateData
+        );
+      } else {
+        await addDoc(collection(db, 'cleaningTasks'), {
+          ...taskForm,
+          createdBy: user.uid,
+          createdAt: new Date()
         });
       }
 
-      await updateDoc(doc(db, 'cleaningTasks', editingTask.id), updateData);
-    } else {
-      await addDoc(collection(db, 'cleaningTasks'), {
-        ...taskForm,
-        createdBy: user.uid,
-        createdAt: new Date()
-      });
+      setShowModal(false);
+      setEditingTask(null);
+      setTaskForm(emptyTask);
+      fetchCleaningTasks();
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
     }
-
-    setShowModal(false);
-    setEditingTask(null);
-    setTaskForm(emptyTask);
-    fetchCleaningTasks();
   };
 
   /* ---------------- DELETE TASK ---------------- */
   const deleteTask = async task => {
-    if (!window.confirm(`Delete cleaning task for ${task.roomNumber}?`)) return;
+    if (userRole === 'manager' || userRole === 'staff') {
+      return alert('Staff cannot delete tasks');
+    }
 
-    await deleteDoc(doc(db, 'cleaningTasks', task.id));
-    fetchCleaningTasks();
+    if (!window.confirm(`Delete cleaning task for room ${task.roomNumber}?`))
+      return;
+
+    try {
+      await deleteDoc(doc(db, 'cleaningTasks', task.id));
+      fetchCleaningTasks();
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
+    }
   };
 
-  /* ---------------- STATUS BADGE ---------------- */
+  /* ---------------- BADGES ---------------- */
   const getStatusBadge = status => {
     const variants = {
       pending: 'warning',
       'in-progress': 'info',
       completed: 'success'
     };
-    return <Badge bg={variants[status] || 'secondary'}>{status}</Badge>;
+    return <Badge bg={variants[status]}>{status}</Badge>;
   };
 
-  /* ---------------- PRIORITY BADGE ---------------- */
   const getPriorityBadge = priority => {
     const variants = {
       low: 'success',
       medium: 'warning',
       high: 'danger'
     };
-    return <Badge bg={variants[priority] || 'secondary'}>{priority}</Badge>;
+    return <Badge bg={variants[priority]}>{priority}</Badge>;
   };
 
-  /* ---------------- FILTERED TASKS ---------------- */
-  const filteredTasks = cleaningTasks.filter(task => {
-    if (filterStatus === 'all') return true;
-    return task.status === filterStatus;
-  });
+  /* ---------------- FILTER ---------------- */
+  const filteredTasks = cleaningTasks.filter(task =>
+    filterStatus === 'all' ? true : task.status === filterStatus
+  );
 
   /* ---------------- UI ---------------- */
   return (
@@ -191,14 +231,17 @@ function CleaningManagement() {
             Manage room cleaning tasks and assignments
           </p>
         </Col>
-        <Col className="text-end">
-          <Button className="me-2" onClick={() => setShowModal(true)}>
-            + Create Task
-          </Button>
-        </Col>
+
+        {(userRole === 'admin' || userRole === 'manager') && (
+          <Col className="text-end">
+            <Button onClick={() => setShowModal(true)}>
+              + Create Task
+            </Button>
+          </Col>
+        )}
       </Row>
 
-      {/* FILTERS */}
+      {/* FILTER */}
       <Row className="mb-3">
         <Col md={3}>
           <Form.Select
@@ -222,7 +265,7 @@ function CleaningManagement() {
               <thead>
                 <tr>
                   <th>Room</th>
-                  <th>Task Type</th>
+                  <th>Task</th>
                   <th>Status</th>
                   <th>Priority</th>
                   <th>Assigned To</th>
@@ -238,7 +281,9 @@ function CleaningManagement() {
                     <td>{getStatusBadge(task.status)}</td>
                     <td>{getPriorityBadge(task.priority)}</td>
                     <td>{task.assignedTo || '—'}</td>
-                    <td>{task.createdAt?.toDate?.()?.toLocaleDateString() || '—'}</td>
+                    <td>
+                      {task.createdAt?.toDate?.().toLocaleDateString() || '—'}
+                    </td>
                     <td>
                       <Button
                         size="sm"
@@ -251,13 +296,16 @@ function CleaningManagement() {
                       >
                         Edit
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => deleteTask(task)}
-                      >
-                        Delete
-                      </Button>
+
+                      {(userRole === 'admin' || userRole === 'manager') && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => deleteTask(task)}
+                        >
+                          Delete
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -283,7 +331,9 @@ function CleaningManagement() {
                 <Form.Select
                   value={taskForm.roomNumber}
                   onChange={e => {
-                    const r = rooms.find(room => room.roomNumber === e.target.value);
+                    const r = rooms.find(
+                      room => room.roomNumber === e.target.value
+                    );
                     setTaskForm({
                       ...taskForm,
                       roomNumber: e.target.value,
@@ -304,7 +354,9 @@ function CleaningManagement() {
                 <Form.Label>Task Type</Form.Label>
                 <Form.Select
                   value={taskForm.taskType}
-                  onChange={e => setTaskForm({ ...taskForm, taskType: e.target.value })}
+                  onChange={e =>
+                    setTaskForm({ ...taskForm, taskType: e.target.value })
+                  }
                 >
                   <option>Standard Clean</option>
                   <option>Deep Clean</option>
@@ -317,7 +369,9 @@ function CleaningManagement() {
                 <Form.Label>Priority</Form.Label>
                 <Form.Select
                   value={taskForm.priority}
-                  onChange={e => setTaskForm({ ...taskForm, priority: e.target.value })}
+                  onChange={e =>
+                    setTaskForm({ ...taskForm, priority: e.target.value })
+                  }
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -331,7 +385,9 @@ function CleaningManagement() {
                 <Form.Label>Status</Form.Label>
                 <Form.Select
                   value={taskForm.status}
-                  onChange={e => setTaskForm({ ...taskForm, status: e.target.value })}
+                  onChange={e =>
+                    setTaskForm({ ...taskForm, status: e.target.value })
+                  }
                 >
                   <option value="pending">Pending</option>
                   <option value="in-progress">In Progress</option>
@@ -344,7 +400,9 @@ function CleaningManagement() {
                 <Form.Control
                   placeholder="Staff name"
                   value={taskForm.assignedTo}
-                  onChange={e => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
+                  onChange={e =>
+                    setTaskForm({ ...taskForm, assignedTo: e.target.value })
+                  }
                 />
               </Form.Group>
 
@@ -353,9 +411,10 @@ function CleaningManagement() {
                 <Form.Control
                   as="textarea"
                   rows={3}
-                  placeholder="Additional notes"
                   value={taskForm.notes}
-                  onChange={e => setTaskForm({ ...taskForm, notes: e.target.value })}
+                  onChange={e =>
+                    setTaskForm({ ...taskForm, notes: e.target.value })
+                  }
                 />
               </Form.Group>
             </Col>

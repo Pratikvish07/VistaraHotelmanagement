@@ -10,6 +10,7 @@ const RoomManagement = lazy(() => import('./components/rooms/RoomManagement'));
 const CustomerManagement = lazy(() => import('./components/customers/CustomerManagement'));
 const BookingManagement = lazy(() => import('./components/bookings/BookingManagement'));
 const CleaningManagement = lazy(() => import('./components/cleaning/CleaningManagement'));
+const FoodManagement = lazy(() => import('./components/food/FoodManagement'));
 
 const LoadingSpinner = () => (
   <div className="d-flex justify-content-center align-items-center" style={{ height: '100vh' }}>
@@ -68,6 +69,15 @@ function App() {
               element={
                 <ProtectedRoute>
                   <CleaningManagement />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/food"
+              element={
+                <ProtectedRoute>
+                  <FoodManagement />
                 </ProtectedRoute>
               }
             />

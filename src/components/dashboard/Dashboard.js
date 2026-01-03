@@ -156,6 +156,21 @@ function Dashboard() {
               </Card.Body>
             </Card>
           </Col>
+
+          {/* 🍔 Food */}
+          <Col md={6} lg={3}>
+            <Card className="shadow-sm h-100">
+              <Card.Body>
+                <Card.Title>Food</Card.Title>
+                <Card.Text>
+                  Manage food items and prices for the hotel.
+                </Card.Text>
+                <Link to="/food">
+                  <Button variant="secondary">Manage Food</Button>
+                </Link>
+              </Card.Body>
+            </Card>
+          </Col>
         </Row>
       </Container>
     </>

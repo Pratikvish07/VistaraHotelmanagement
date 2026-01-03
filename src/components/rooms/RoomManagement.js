@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db, auth, storage } from '../../firebase-config';
-
 import {
   collection,
   getDocs,
@@ -13,10 +11,8 @@ import {
   where,
   getDoc
 } from 'firebase/firestore';
-
 import { onAuthStateChanged } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-
 import {
   Container,
   Row,
@@ -30,12 +26,13 @@ import {
   Table
 } from 'react-bootstrap';
 
+import { db, auth, storage } from '../../firebase-config';
+
 function RoomManagement() {
   const navigate = useNavigate();
 
   const [rooms, setRooms] = useState([]);
   const [user, setUser] = useState(null);
-  const [userRole, setUserRole] = useState(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -55,127 +52,132 @@ function RoomManagement() {
 
   /* ---------------- AUTH ---------------- */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
+    const unsub = onAuthStateChanged(auth, currentUser => {
+      setUser(currentUser);
+    });
     return () => unsub();
   }, []);
-
-  /* ---------------- ROLE ---------------- */
-  useEffect(() => {
-    if (!user) return;
-
-    const fetchRole = async () => {
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (snap.exists()) setUserRole(snap.data().role);
-    };
-
-    fetchRole();
-  }, [user]);
 
   /* ---------------- FETCH ROOMS (SYNC WITH BOOKINGS) ---------------- */
   const fetchRoomsWithBookingStatus = async () => {
     if (!user) return;
 
-    // 1️⃣ Fetch rooms
-    const roomsSnap = await getDocs(
-      query(collection(db, 'rooms'), where('createdBy', '==', user.uid))
-    );
+    try {
+      // 1️⃣ Rooms
+      const roomsSnap = await getDocs(
+        query(collection(db, 'rooms'), where('createdBy', '==', user.uid))
+      );
 
-    const roomsData = roomsSnap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
+      const roomsData = roomsSnap.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
 
-    // 2️⃣ Fetch ACTIVE bookings
-    const bookingsSnap = await getDocs(
-      query(
-        collection(db, 'bookings'),
-        where('createdBy', '==', user.uid),
-        where('status', '==', 'active')
-      )
-    );
+      // 2️⃣ Active bookings
+      const bookingsSnap = await getDocs(
+        query(
+          collection(db, 'bookings'),
+          where('createdBy', '==', user.uid),
+          where('status', '==', 'active')
+        )
+      );
 
-    const occupiedRoomIds = bookingsSnap.docs.map(
-      b => b.data().roomId
-    );
+      const occupiedRoomIds = bookingsSnap.docs.map(
+        b => b.data().roomId
+      );
 
-    // 3️⃣ Merge booking state into rooms
-    const syncedRooms = roomsData.map(room => {
-      const occupied = occupiedRoomIds.includes(room.id);
-      return {
-        ...room,
-        isVacant: !occupied,
-        status: occupied ? 'occupied' : 'available'
-      };
-    });
+      // 3️⃣ Merge
+      const syncedRooms = roomsData.map(room => {
+        const occupied = occupiedRoomIds.includes(room.id);
+        return {
+          ...room,
+          isVacant: !occupied,
+          status: occupied ? 'occupied' : 'available'
+        };
+      });
 
-    setRooms(syncedRooms);
+      setRooms(syncedRooms);
+    } catch (error) {
+      console.error('Fetch rooms error:', error);
+      alert(error.message);
+    }
   };
 
   useEffect(() => {
-    fetchRoomsWithBookingStatus();
+    if (user) fetchRoomsWithBookingStatus();
   }, [user]);
 
   /* ---------------- CREATE ROOM ---------------- */
   const createRoom = async () => {
     if (!user) return alert('Not authenticated');
 
-    let documentUrl = '';
+    try {
+      let documentUrl = '';
 
-    if (newRoom.documentFile) {
-      const storageRef = ref(
-        storage,
-        `room-documents/${user.uid}/${Date.now()}_${newRoom.documentFile.name}`
-      );
-      await uploadBytes(storageRef, newRoom.documentFile);
-      documentUrl = await getDownloadURL(storageRef);
+      if (newRoom.documentFile) {
+        const storageRef = ref(
+          storage,
+          `room-documents/${user.uid}/${Date.now()}_${newRoom.documentFile.name}`
+        );
+        await uploadBytes(storageRef, newRoom.documentFile);
+        documentUrl = await getDownloadURL(storageRef);
+      }
+
+      await addDoc(collection(db, 'rooms'), {
+        roomNumber: newRoom.roomNumber,
+        type: newRoom.type,
+        price: Number(newRoom.price),
+        paymentMethod: newRoom.paymentMethod,
+        paymentReceived: newRoom.paymentReceived,
+        cleaningDone: newRoom.cleaningDone,
+        status: 'available',
+        isVacant: true,
+        documentUrl,
+        createdBy: user.uid,
+        createdAt: new Date()
+      });
+
+      setShowAddModal(false);
+      setNewRoom(emptyRoom);
+      fetchRoomsWithBookingStatus();
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
     }
-
-    await addDoc(collection(db, 'rooms'), {
-      roomNumber: newRoom.roomNumber,
-      type: newRoom.type,
-      price: Number(newRoom.price),
-      paymentMethod: newRoom.paymentMethod,
-      paymentReceived: newRoom.paymentReceived,
-      cleaningDone: newRoom.cleaningDone,
-      status: 'available',
-      isVacant: true,
-      documentUrl,
-      createdBy: user.uid,
-      createdAt: new Date()
-    });
-
-    setShowAddModal(false);
-    setNewRoom(emptyRoom);
-    fetchRoomsWithBookingStatus();
   };
 
   /* ---------------- EDIT ROOM ---------------- */
   const editRoom = async () => {
-    if (!editingRoom) return;
+    if (!editingRoom || !user) return;
 
-    let documentUrl = editingRoom.documentUrl || '';
+    try {
+      let documentUrl = editingRoom.documentUrl || '';
 
-    if (editingRoom.documentFile) {
-      const storageRef = ref(
-        storage,
-        `room-documents/${user.uid}/${Date.now()}_${editingRoom.documentFile.name}`
-      );
-      await uploadBytes(storageRef, editingRoom.documentFile);
-      documentUrl = await getDownloadURL(storageRef);
+      if (editingRoom.documentFile) {
+        const storageRef = ref(
+          storage,
+          `room-documents/${user.uid}/${Date.now()}_${editingRoom.documentFile.name}`
+        );
+        await uploadBytes(storageRef, editingRoom.documentFile);
+        documentUrl = await getDownloadURL(storageRef);
+      }
+
+      const { id, documentFile, ...safeData } = editingRoom;
+
+      await updateDoc(doc(db, 'rooms', id), {
+        ...safeData,
+        price: Number(safeData.price),
+        documentUrl,
+        updatedAt: new Date()
+      });
+
+      setShowEditModal(false);
+      setEditingRoom(null);
+      fetchRoomsWithBookingStatus();
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
     }
-
-    const { id, documentFile, ...safeData } = editingRoom;
-
-    await updateDoc(doc(db, 'rooms', id), {
-      ...safeData,
-      price: Number(safeData.price),
-      documentUrl,
-      updatedAt: new Date()
-    });
-
-    setShowEditModal(false);
-    setEditingRoom(null);
-    fetchRoomsWithBookingStatus();
   };
 
   /* ---------------- DELETE ROOM ---------------- */
@@ -186,8 +188,13 @@ function RoomManagement() {
 
     if (!window.confirm(`Delete Room ${room.roomNumber}?`)) return;
 
-    await deleteDoc(doc(db, 'rooms', room.id));
-    fetchRoomsWithBookingStatus();
+    try {
+      await deleteDoc(doc(db, 'rooms', room.id));
+      fetchRoomsWithBookingStatus();
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
+    }
   };
 
   /* ---------------- STATUS BADGE ---------------- */
@@ -210,17 +217,13 @@ function RoomManagement() {
             ← Back to Dashboard
           </Button>
           <h1>Room Management</h1>
-          <p className="text-muted">
-            Room status auto-synced from bookings
-          </p>
+          <p className="text-muted">Room status auto-synced from bookings</p>
         </Col>
       </Row>
 
-      {userRole === 'manager' && (
-        <Button className="mb-3" onClick={() => setShowAddModal(true)}>
-          + Add Room
-        </Button>
-      )}
+      <Button className="mb-3" onClick={() => setShowAddModal(true)}>
+        + Add Room
+      </Button>
 
       <Card>
         <Card.Body>
@@ -277,27 +280,23 @@ function RoomManagement() {
                       ) : '—'}
                     </td>
                     <td>
-                      {userRole === 'manager' && (
-                        <>
-                          <Button
-                            size="sm"
-                            className="me-2"
-                            onClick={() => {
-                              setEditingRoom(r);
-                              setShowEditModal(true);
-                            }}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => deleteRoom(r)}
-                          >
-                            Delete
-                          </Button>
-                        </>
-                      )}
+                      <Button
+                        size="sm"
+                        className="me-2"
+                        onClick={() => {
+                          setEditingRoom(r);
+                          setShowEditModal(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => deleteRoom(r)}
+                      >
+                        Delete
+                      </Button>
                     </td>
                   </tr>
                 ))}
